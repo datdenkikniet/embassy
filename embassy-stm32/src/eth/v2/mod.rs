@@ -38,15 +38,9 @@ pub struct Ethernet<'d, T: Instance, P: Phy> {
     _peri: Peri<'d, T>,
     pub(crate) tx: TDesRing<'d>,
     pub(crate) rx: RDesRing<'d>,
-    pins: Pins<'d>,
+    pins: PrivatePins<'d>,
     pub(crate) phy: P,
     pub(crate) mac_addr: [u8; 6],
-}
-
-/// Pins of ethernet driver.
-enum Pins<'d> {
-    Rmii([Peri<'d, AnyPin>; 7]),
-    Mii([Peri<'d, AnyPin>; 12]),
 }
 
 macro_rules! config_pins {
@@ -58,6 +52,88 @@ macro_rules! config_pins {
             )*
         })
     };
+}
+
+/// The pins that can be used in the ethernet peripheral.
+pub struct Pins<'d, T: Instance> {
+    _phantom: core::marker::PhantomData<T>,
+    pins: PrivatePins<'d>,
+}
+
+impl<'d, T: Instance> Pins<'d, T> {
+    /// Create a new pin instance with RMII pins.
+    pub fn rmii(
+        ref_clk: Peri<'d, impl RefClkPin<T>>,
+        crs: Peri<'d, impl CRSPin<T>>,
+        rx_d0: Peri<'d, impl RXD0Pin<T>>,
+        rx_d1: Peri<'d, impl RXD1Pin<T>>,
+        tx_d0: Peri<'d, impl TXD0Pin<T>>,
+        tx_d1: Peri<'d, impl TXD1Pin<T>>,
+        tx_en: Peri<'d, impl TXEnPin<T>>,
+    ) -> Self {
+        config_pins!(ref_clk, crs, rx_d0, rx_d1, tx_d0, tx_d1, tx_en);
+
+        let pins = PrivatePins::Rmii([
+            ref_clk.into(),
+            crs.into(),
+            rx_d0.into(),
+            rx_d1.into(),
+            tx_d0.into(),
+            tx_d1.into(),
+            tx_en.into(),
+        ]);
+
+        Self {
+            pins,
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Create a new pin instance with MII pins.
+    pub fn mii(
+        rx_clk: Peri<'d, impl RXClkPin<T>>,
+        tx_clk: Peri<'d, impl TXClkPin<T>>,
+        rxdv: Peri<'d, impl RXDVPin<T>>,
+        rx_d0: Peri<'d, impl RXD0Pin<T>>,
+        rx_d1: Peri<'d, impl RXD1Pin<T>>,
+        rx_d2: Peri<'d, impl RXD2Pin<T>>,
+        rx_d3: Peri<'d, impl RXD3Pin<T>>,
+        tx_d0: Peri<'d, impl TXD0Pin<T>>,
+        tx_d1: Peri<'d, impl TXD1Pin<T>>,
+        tx_d2: Peri<'d, impl TXD2Pin<T>>,
+        tx_d3: Peri<'d, impl TXD3Pin<T>>,
+        tx_en: Peri<'d, impl TXEnPin<T>>,
+    ) -> Self {
+        config_pins!(
+            rx_clk, tx_clk, rxdv, rx_d0, rx_d1, rx_d2, rx_d3, tx_d0, tx_d1, tx_d2, tx_d3, tx_en
+        );
+
+        let pins = PrivatePins::Mii([
+            rx_clk.into(),
+            tx_clk.into(),
+            rxdv.into(),
+            rx_d0.into(),
+            rx_d1.into(),
+            rx_d2.into(),
+            rx_d3.into(),
+            tx_d0.into(),
+            tx_d1.into(),
+            tx_d2.into(),
+            tx_d3.into(),
+            tx_en.into(),
+        ]);
+
+        Self {
+            pins,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+/// Pins of ethernet driver.
+enum PrivatePins<'d> {
+    Rmii([Peri<'d, AnyPin>; 7]),
+    Mii([Peri<'d, AnyPin>; 12]),
 }
 
 impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
@@ -87,17 +163,7 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
             crate::pac::SYSCFG.pmcr().modify(|w| w.set_eth_sel_phy(EthSelPhy::RMII));
         });
 
-        config_pins!(ref_clk, crs, rx_d0, rx_d1, tx_d0, tx_d1, tx_en);
-
-        let pins = Pins::Rmii([
-            ref_clk.into(),
-            crs.into(),
-            rx_d0.into(),
-            rx_d1.into(),
-            tx_d0.into(),
-            tx_d1.into(),
-            tx_en.into(),
-        ]);
+        let pins = Pins::rmii(ref_clk, crs, rx_d0, rx_d1, tx_d0, tx_d1, tx_en).pins;
 
         Self::new_inner(queue, peri, irq, pins, phy, mac_addr)
     }
@@ -135,24 +201,10 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
                 .modify(|w| w.set_eth_sel_phy(EthSelPhy::MII_GMII));
         });
 
-        config_pins!(
-            rx_clk, tx_clk, rxdv, rx_d0, rx_d1, rx_d2, rx_d3, tx_d0, tx_d1, tx_d2, tx_d3, tx_en
-        );
-
-        let pins = Pins::Mii([
-            rx_clk.into(),
-            tx_clk.into(),
-            rxdv.into(),
-            rx_d0.into(),
-            rx_d1.into(),
-            rx_d2.into(),
-            rx_d3.into(),
-            tx_d0.into(),
-            tx_d1.into(),
-            tx_d2.into(),
-            tx_d3.into(),
-            tx_en.into(),
-        ]);
+        let pins = Pins::mii(
+            rx_clk, tx_clk, rxdv, rx_d0, rx_d1, rx_d2, rx_d3, tx_d0, tx_d1, tx_d2, tx_d3, tx_en,
+        )
+        .pins;
 
         Self::new_inner(queue, peri, irq, pins, phy, mac_addr)
     }
@@ -161,7 +213,7 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
         queue: &'d mut PacketQueue<TX, RX>,
         peri: Peri<'d, T>,
         _irq: impl interrupt::typelevel::Binding<interrupt::typelevel::ETH, InterruptHandler> + 'd,
-        pins: Pins<'d>,
+        pins: PrivatePins<'d>,
         phy: P,
         mac_addr: [u8; 6],
     ) -> Self {
@@ -295,8 +347,8 @@ impl<'d, T: Instance, P: Phy> Drop for Ethernet<'d, T, P> {
 
         critical_section::with(|_| {
             for pin in match self.pins {
-                Pins::Rmii(ref mut pins) => pins.iter_mut(),
-                Pins::Mii(ref mut pins) => pins.iter_mut(),
+                PrivatePins::Rmii(ref mut pins) => pins.iter_mut(),
+                PrivatePins::Mii(ref mut pins) => pins.iter_mut(),
             } {
                 pin.set_as_disconnected();
             }
