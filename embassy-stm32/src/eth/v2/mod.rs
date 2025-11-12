@@ -136,8 +136,12 @@ enum PrivatePins<'d> {
     Mii([Peri<'d, AnyPin>; 12]),
 }
 
-impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
-    /// Create a new RMII ethernet driver using 7 pins.
+impl<'d, T: Instance, SM: StationManagement> Ethernet<'d, T, GenericPhy<SM>> {
+    /// Create a new RMII ethernet driver using 9 pins.
+    ///
+    /// This function creates a [`GenericPhy::new_auto`] using the provided [`StationManagement`].
+    ///
+    /// For more configurability, use [`Ethernet::new_with_phy`].
     pub fn new<const TX: usize, const RX: usize>(
         queue: &'d mut PacketQueue<TX, RX>,
         peri: Peri<'d, T>,
@@ -149,26 +153,18 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
         tx_d0: Peri<'d, impl TXD0Pin<T>>,
         tx_d1: Peri<'d, impl TXD1Pin<T>>,
         tx_en: Peri<'d, impl TXEnPin<T>>,
-        phy: P,
+        sm: SM,
         mac_addr: [u8; 6],
     ) -> Self {
-        // Enable the necessary clocks
-        critical_section::with(|_| {
-            crate::pac::RCC.ahb1enr().modify(|w| {
-                w.set_ethen(true);
-                w.set_ethtxen(true);
-                w.set_ethrxen(true);
-            });
-
-            crate::pac::SYSCFG.pmcr().modify(|w| w.set_eth_sel_phy(EthSelPhy::RMII));
-        });
-
-        let pins = Pins::rmii(ref_clk, crs, rx_d0, rx_d1, tx_d0, tx_d1, tx_en).pins;
-
-        Self::new_inner(queue, peri, irq, pins, phy, mac_addr)
+        let pins = Pins::rmii(ref_clk, crs, rx_d0, rx_d1, tx_d0, tx_d1, tx_en);
+        Self::new_with_phy(queue, peri, irq, pins, GenericPhy::new_auto(sm), mac_addr)
     }
 
-    /// Create a new MII ethernet driver using 12 pins.
+    /// Create a new MII ethernet driver using 14 pins.
+    ///
+    /// This function creates a [`GenericPhy::new_auto`] using the provided [`StationManagement`].
+    ///
+    /// For more configurability, use [`Ethernet::new_with_phy`].
     pub fn new_mii<const TX: usize, const RX: usize>(
         queue: &'d mut PacketQueue<TX, RX>,
         peri: Peri<'d, T>,
@@ -185,6 +181,23 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
         tx_d2: Peri<'d, impl TXD2Pin<T>>,
         tx_d3: Peri<'d, impl TXD3Pin<T>>,
         tx_en: Peri<'d, impl TXEnPin<T>>,
+        sm: SM,
+        mac_addr: [u8; 6],
+    ) -> Self {
+        let pins = Pins::mii(
+            rx_clk, tx_clk, rxdv, rx_d0, rx_d1, rx_d2, rx_d3, tx_d0, tx_d1, tx_d2, tx_d3, tx_en,
+        );
+        Self::new_with_phy(queue, peri, irq, pins, GenericPhy::new_auto(sm), mac_addr)
+    }
+}
+
+impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
+    /// Create a new ethernet driver with the given `phy`.
+    pub fn new_with_phy<const TX: usize, const RX: usize>(
+        queue: &'d mut PacketQueue<TX, RX>,
+        peri: Peri<'d, T>,
+        irq: impl interrupt::typelevel::Binding<interrupt::typelevel::ETH, InterruptHandler> + 'd,
+        pins: Pins<'d, T>,
         phy: P,
         mac_addr: [u8; 6],
     ) -> Self {
@@ -196,15 +209,13 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
                 w.set_ethrxen(true);
             });
 
-            crate::pac::SYSCFG
-                .pmcr()
-                .modify(|w| w.set_eth_sel_phy(EthSelPhy::MII_GMII));
-        });
+            let eth_sel = match &pins.pins {
+                PrivatePins::Rmii(_) => EthSelPhy::RMII,
+                PrivatePins::Mii(_) => EthSelPhy::MII_GMII,
+            };
 
-        let pins = Pins::mii(
-            rx_clk, tx_clk, rxdv, rx_d0, rx_d1, rx_d2, rx_d3, tx_d0, tx_d1, tx_d2, tx_d3, tx_en,
-        )
-        .pins;
+            crate::pac::SYSCFG.pmcr().modify(|w| w.set_eth_sel_phy(eth_sel));
+        });
 
         Self::new_inner(queue, peri, irq, pins, phy, mac_addr)
     }
@@ -213,7 +224,7 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
         queue: &'d mut PacketQueue<TX, RX>,
         peri: Peri<'d, T>,
         _irq: impl interrupt::typelevel::Binding<interrupt::typelevel::ETH, InterruptHandler> + 'd,
-        pins: PrivatePins<'d>,
+        pins: Pins<'d, T>,
         phy: P,
         mac_addr: [u8; 6],
     ) -> Self {
@@ -282,7 +293,7 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
             _peri: peri,
             tx: TDesRing::new(&mut queue.tx_desc, &mut queue.tx_buf),
             rx: RDesRing::new(&mut queue.rx_desc, &mut queue.rx_buf),
-            pins,
+            pins: pins.pins,
             phy,
             mac_addr,
         };
