@@ -6,7 +6,6 @@ use embassy_hal_internal::Peri;
 use stm32_metapac::syscfg::vals::EthSelPhy;
 
 pub(crate) use self::descriptors::{RDes, RDesRing, TDes, TDesRing};
-use super::sma::{MDCPin, MDIOPin, Sma};
 use super::*;
 use crate::gpio::{AfType, AnyPin, OutputType, SealedPin as _, Speed};
 use crate::interrupt;
@@ -41,7 +40,6 @@ pub struct Ethernet<'d, T: Instance, P: Phy> {
     pub(crate) rx: RDesRing<'d>,
     pins: Pins<'d>,
     pub(crate) phy: P,
-    pub(crate) station_management: Sma<'d, T>,
     pub(crate) mac_addr: [u8; 6],
 }
 
@@ -63,14 +61,12 @@ macro_rules! config_pins {
 }
 
 impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
-    /// Create a new RMII ethernet driver using 9 pins.
+    /// Create a new RMII ethernet driver using 7 pins.
     pub fn new<const TX: usize, const RX: usize>(
         queue: &'d mut PacketQueue<TX, RX>,
         peri: Peri<'d, T>,
         irq: impl interrupt::typelevel::Binding<interrupt::typelevel::ETH, InterruptHandler> + 'd,
         ref_clk: Peri<'d, impl RefClkPin<T>>,
-        mdio: Peri<'d, impl MDIOPin<T>>,
-        mdc: Peri<'d, impl MDCPin<T>>,
         crs: Peri<'d, impl CRSPin<T>>,
         rx_d0: Peri<'d, impl RXD0Pin<T>>,
         rx_d1: Peri<'d, impl RXD1Pin<T>>,
@@ -103,18 +99,16 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
             tx_en.into(),
         ]);
 
-        Self::new_inner(queue, peri, irq, pins, mdio, mdc, phy, mac_addr)
+        Self::new_inner(queue, peri, irq, pins, phy, mac_addr)
     }
 
-    /// Create a new MII ethernet driver using 14 pins.
+    /// Create a new MII ethernet driver using 12 pins.
     pub fn new_mii<const TX: usize, const RX: usize>(
         queue: &'d mut PacketQueue<TX, RX>,
         peri: Peri<'d, T>,
         irq: impl interrupt::typelevel::Binding<interrupt::typelevel::ETH, InterruptHandler> + 'd,
         rx_clk: Peri<'d, impl RXClkPin<T>>,
         tx_clk: Peri<'d, impl TXClkPin<T>>,
-        mdio: Peri<'d, impl MDIOPin<T>>,
-        mdc: Peri<'d, impl MDCPin<T>>,
         rxdv: Peri<'d, impl RXDVPin<T>>,
         rx_d0: Peri<'d, impl RXD0Pin<T>>,
         rx_d1: Peri<'d, impl RXD1Pin<T>>,
@@ -160,7 +154,7 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
             tx_en.into(),
         ]);
 
-        Self::new_inner(queue, peri, irq, pins, mdio, mdc, phy, mac_addr)
+        Self::new_inner(queue, peri, irq, pins, phy, mac_addr)
     }
 
     fn new_inner<const TX: usize, const RX: usize>(
@@ -168,8 +162,6 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
         peri: Peri<'d, T>,
         _irq: impl interrupt::typelevel::Binding<interrupt::typelevel::ETH, InterruptHandler> + 'd,
         pins: Pins<'d>,
-        mdio: Peri<'d, impl MDIOPin<T>>,
-        mdc: Peri<'d, impl MDCPin<T>>,
         phy: P,
         mac_addr: [u8; 6],
     ) -> Self {
@@ -234,15 +226,12 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
             w.set_rbsz(RX_BUFFER_SIZE as u16);
         });
 
-        let sma_peri = unsafe { peri.clone_unchecked() };
-
         let mut this = Self {
             _peri: peri,
             tx: TDesRing::new(&mut queue.tx_desc, &mut queue.tx_buf),
             rx: RDesRing::new(&mut queue.rx_desc, &mut queue.rx_buf),
             pins,
             phy,
-            station_management: Sma::new(sma_peri, mdio, mdc),
             mac_addr,
         };
 
@@ -268,8 +257,8 @@ impl<'d, T: Instance, P: Phy> Ethernet<'d, T, P> {
             w.set_tie(true);
         });
 
-        this.phy.phy_reset(&mut this.station_management);
-        this.phy.phy_init(&mut this.station_management);
+        this.phy.phy_reset();
+        this.phy.phy_init();
 
         interrupt::ETH.unpend();
         unsafe { interrupt::ETH.enable() };
