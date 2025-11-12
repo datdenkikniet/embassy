@@ -1033,8 +1033,6 @@ fn main() {
         (("eth", "REF_CLK"), quote!(crate::eth::RefClkPin)),
         (("eth", "RX_CLK"), quote!(crate::eth::RXClkPin)),
         (("eth", "TX_CLK"), quote!(crate::eth::TXClkPin)),
-        (("eth", "MDIO"), quote!(crate::eth::MDIOPin)),
-        (("eth", "MDC"), quote!(crate::eth::MDCPin)),
         (("eth", "CRS_DV"), quote!(crate::eth::CRSPin)),
         (("eth", "RX_DV"), quote!(crate::eth::RXDVPin)),
         (("eth", "RXD0"), quote!(crate::eth::RXD0Pin)),

@@ -16,6 +16,7 @@ use embassy_sync::waitqueue::AtomicWaker;
 
 pub use self::_version::{InterruptHandler, *};
 pub use self::generic_phy::*;
+pub use self::sma::{Sma, StationManagement};
 use crate::rcc::RccPeripheral;
 
 #[allow(unused)]
@@ -156,14 +157,6 @@ impl<'a, 'd> embassy_net_driver::TxToken for TxToken<'a, 'd> {
         self.tx.transmit(len);
         r
     }
-}
-
-/// Station Management Interface (SMI) on an ethernet PHY
-pub trait StationManagement {
-    /// Read a register over SMI.
-    fn smi_read(&mut self, phy_addr: u8, reg: u8) -> u16;
-    /// Write a register over SMI.
-    fn smi_write(&mut self, phy_addr: u8, reg: u8, val: u16);
 }
 
 /// Trait for an Ethernet PHY
